@@ -23,8 +23,55 @@ pip install -r requirements.txt
 
 ### 使用示例
 
+#### 命令行使用
+
+```bash
+# 获取指定UP主的所有视频信息
+python main.py --uid 486272
+
+# 限制获取视频数量
+python main.py --uid 486272 --max-videos 50
+
+# 指定输出格式（json/csv/both）
+python main.py --uid 486272 --format json
+
+# 指定输出目录
+python main.py --uid 486272 --output ./data/
+
+# 添加请求延迟（避免请求过快）
+python main.py --uid 486272 --delay 2
+
+# 生成总结报告
+python main.py --uid 486272 --summary
+
+# 静默模式（减少输出信息）
+python main.py --uid 486272 --quiet
+```
+
+#### Python代码使用
+
 ```python
-# 示例代码将在后续版本中提供
+from billbillbug import BilibiliScraper, DataExporter
+
+# 创建爬虫实例
+scraper = BilibiliScraper(delay=1.0)
+
+# 爬取UP主视频信息
+data = scraper.scrape_up_master(uid="486272", max_videos=100)
+
+# 导出数据
+exporter = DataExporter()
+exporter.export_to_json(data, "videos.json")
+exporter.export_to_csv(data, "videos.csv")
+exporter.export_summary_txt(data, "summary.txt")
+```
+
+#### 演示模式
+
+由于网络限制，可以运行演示模式查看功能：
+
+```bash
+python demo.py
 ```
 
 ## API参考
@@ -37,10 +84,14 @@ pip install -r requirements.txt
 
 ### 开发计划
 
-- [ ] 实现up主视频信息爬虫 ([#1](https://github.com/worldhello-bj/billbillbug/issues/1))
-- [ ] 添加数据存储功能
+- [x] 实现up主视频信息爬虫 ([#1](https://github.com/worldhello-bj/billbillbug/issues/1))
+- [x] 添加数据存储功能
+- [x] 支持多种导出格式（JSON、CSV）
+- [x] 添加命令行界面
+- [x] 添加错误处理和重试机制
 - [ ] 支持批量采集
-- [ ] 添加错误处理和重试机制
+- [ ] 添加数据可视化功能
+- [ ] 支持更多类型的数据采集
 
 ## 许可证
 
