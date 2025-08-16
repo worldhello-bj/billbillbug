@@ -136,6 +136,42 @@ class TestBilibiliScraper(unittest.TestCase):
         self.assertEqual(scraper.delay, 2.0)
         self.assertIsNotNone(scraper.session)
         
+    def test_wbi_mixin_key_generation(self):
+        """Test WBI mixin key generation"""
+        scraper = BilibiliScraper()
+        
+        # Test data from official documentation
+        img_key = "7cd084941338484aae1ad9425b84077c"
+        sub_key = "4932caff0ff746eab6f01bf08b70ac45"
+        expected_mixin = "ea1db124af3c7062474693fa704f4ff8"
+        
+        mixin_key = scraper._get_mixin_key(img_key, sub_key)
+        self.assertEqual(mixin_key, expected_mixin)
+        
+    def test_wbi_params_signing(self):
+        """Test WBI parameter signing"""
+        scraper = BilibiliScraper()
+        
+        # Mock WBI keys
+        img_key = "7cd084941338484aae1ad9425b84077c"
+        sub_key = "4932caff0ff746eab6f01bf08b70ac45"
+        
+        # Mock _get_wbi_keys to return test keys
+        scraper._get_wbi_keys = lambda: (img_key, sub_key)
+        
+        params = {'mid': '486272', 'pn': '1', 'ps': '50'}
+        signed_params = scraper._sign_wbi_params(params)
+        
+        # Check that required fields are present
+        self.assertIn('w_rid', signed_params)
+        self.assertIn('wts', signed_params)
+        self.assertIn('mid', signed_params)
+        
+        # Check that w_rid is a valid 32-character hex string
+        w_rid = signed_params['w_rid']
+        self.assertEqual(len(w_rid), 32)
+        self.assertTrue(all(c in '0123456789abcdef' for c in w_rid))
+        
     def test_format_video_data(self):
         """Test video data formatting"""
         scraper = BilibiliScraper()

@@ -6,12 +6,22 @@ Based on the Bilibili API documentation: https://socialsisteryi.github.io/bilibi
 import requests
 import time
 import json
+import hashlib
+import urllib.parse
 from datetime import datetime
 from typing import Dict, List, Optional
 
 
 class BilibiliScraper:
     """Bilibili video information scraper"""
+    
+    # WBI signature encoding table
+    MIXIN_KEY_ENC_TAB = [
+        46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
+        33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40,
+        61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11,
+        36, 20, 34, 44, 52
+    ]
     
     def __init__(self, delay: float = 1.0):
         """
@@ -23,8 +33,87 @@ class BilibiliScraper:
         self.delay = delay
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Referer': 'https://www.bilibili.com/'
         })
+        self._wbi_cache = {}  # Cache for WBI keys
+        
+    def _get_mixin_key(self, img_key: str, sub_key: str) -> str:
+        """Get mixin key for WBI signing"""
+        orig = img_key + sub_key
+        temp = ''
+        for i in self.MIXIN_KEY_ENC_TAB:
+            temp += orig[i]
+        return temp[:32]
+    
+    def _get_wbi_keys(self) -> tuple[str, str]:
+        """Get WBI keys from bilibili nav API"""
+        # Check cache first (cache for 1 hour)
+        current_time = time.time()
+        if self._wbi_cache and current_time - self._wbi_cache.get('timestamp', 0) < 3600:
+            return self._wbi_cache['img_key'], self._wbi_cache['sub_key']
+            
+        try:
+            response = self.session.get('https://api.bilibili.com/x/web-interface/nav', timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data.get('code') == 0 or data.get('code') == -101:  # -101 is ok (not logged in)
+                wbi_img = data['data']['wbi_img']
+                img_url = wbi_img['img_url']
+                sub_url = wbi_img['sub_url']
+                
+                # Extract keys from URLs
+                img_key = img_url.split('/')[-1].split('.')[0]
+                sub_key = sub_url.split('/')[-1].split('.')[0]
+                
+                # Cache the keys
+                self._wbi_cache = {
+                    'img_key': img_key,
+                    'sub_key': sub_key,
+                    'timestamp': current_time
+                }
+                
+                return img_key, sub_key
+            else:
+                print(f"Failed to get WBI keys: {data.get('message', 'Unknown error')}")
+                return '', ''
+        except Exception as e:
+            print(f"Error getting WBI keys: {e}")
+            return '', ''
+    
+    def _sign_wbi_params(self, params: dict) -> dict:
+        """Sign parameters with WBI signature"""
+        img_key, sub_key = self._get_wbi_keys()
+        if not img_key or not sub_key:
+            return params  # Return original params if WBI keys unavailable
+            
+        mixin_key = self._get_mixin_key(img_key, sub_key)
+        curr_time = int(time.time())
+        
+        # Add timestamp
+        signed_params = params.copy()
+        signed_params['wts'] = curr_time
+        
+        # Sort parameters
+        sorted_params = dict(sorted(signed_params.items()))
+        
+        # Filter out unwanted characters
+        filtered_params = {}
+        for k, v in sorted_params.items():
+            value_str = str(v)
+            # Remove "!'()*" characters as per API documentation
+            filtered_value = ''.join(char for char in value_str if char not in "!'()*")
+            filtered_params[k] = filtered_value
+        
+        # Create query string
+        query = urllib.parse.urlencode(filtered_params)
+        
+        # Calculate w_rid
+        wbi_sign = hashlib.md5((query + mixin_key).encode()).hexdigest()
+        filtered_params['w_rid'] = wbi_sign
+        
+        return filtered_params
         
     def get_user_videos(self, uid: str, page: int = 1, page_size: int = 50) -> Dict:
         """
@@ -44,11 +133,13 @@ class BilibiliScraper:
             'ps': min(page_size, 50),  # API limit is 50
             'pn': page,
             'order': 'pubdate',  # Sort by publish date
-            'jsonp': 'jsonp'
         }
         
+        # Sign parameters with WBI
+        signed_params = self._sign_wbi_params(params)
+        
         try:
-            response = self.session.get(url, params=params, timeout=10)
+            response = self.session.get(url, params=signed_params, timeout=10)
             response.raise_for_status()
             data = response.json()
             
@@ -84,6 +175,18 @@ class BilibiliScraper:
             
             if data.get('code') == 0:
                 return data['data']
+            elif data.get('code') == -412:
+                print("Request was intercepted, trying with WBI signing...")
+                # Try with WBI signing for better compatibility
+                signed_params = self._sign_wbi_params(params)
+                response = self.session.get(url, params=signed_params, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                if data.get('code') == 0:
+                    return data['data']
+                else:
+                    print(f"API Error after WBI signing: {data.get('message', 'Unknown error')}")
+                    return {}
             else:
                 print(f"API Error: {data.get('message', 'Unknown error')}")
                 return {}
